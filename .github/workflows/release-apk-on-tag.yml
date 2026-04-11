@@ -1,0 +1,54 @@
+name: Release APK
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build release APK
+        run: |
+          WORKDIR="${GITHUB_WORKSPACE:-$(pwd)}"
+          cd "$WORKDIR"
+          if [ -x ./gradlew ]; then
+            ./gradlew assembleDebug
+          else
+            gradle assembleDebug
+          fi
+
+      - name: Rename APK
+        run: |
+          mkdir -p out
+          APK_PATH="$(find app/build/outputs/apk/debug -name '*.apk' | head -n 1)"
+          if [ -z "$APK_PATH" ]; then
+            echo "APK not found"
+            exit 1
+          fi
+          cp "$APK_PATH" "out/sms2dingtalk-debug-${GITHUB_REF_NAME}.apk"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*.apk
