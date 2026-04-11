@@ -28,25 +28,52 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
+      - name: Resolve build variant
+        id: variant
+        run: |
+          if [ -n "${RELEASE_KEYSTORE_PATH:-}" ] && \
+             [ -n "${RELEASE_KEYSTORE_PASSWORD:-}" ] && \
+             [ -n "${RELEASE_KEY_ALIAS:-}" ] && \
+             [ -n "${RELEASE_KEY_PASSWORD:-}" ]; then
+            echo "build_task=assembleRelease" >> "$GITHUB_OUTPUT"
+            echo "artifact_path=app/build/outputs/apk/release" >> "$GITHUB_OUTPUT"
+            echo "artifact_name=sms2dingtalk-release-${GITHUB_REF_NAME}.apk" >> "$GITHUB_OUTPUT"
+            echo "Using release build (signing env detected)."
+          else
+            echo "::warning::Signing config not found, fallback to debug build."
+            echo "build_task=assembleDebug" >> "$GITHUB_OUTPUT"
+            echo "artifact_path=app/build/outputs/apk/debug" >> "$GITHUB_OUTPUT"
+            echo "artifact_name=sms2dingtalk-debug-${GITHUB_REF_NAME}.apk" >> "$GITHUB_OUTPUT"
+            echo "Using debug fallback."
+          fi
+
       - name: Build release APK
         run: |
           WORKDIR="${GITHUB_WORKSPACE:-$(pwd)}"
           cd "$WORKDIR"
-          if [ -x ./gradlew ]; then
-            ./gradlew assembleDebug
+          if [ "${{ steps.variant.outputs.build_task }}" = "assembleRelease" ]; then
+            if [ -x ./gradlew ]; then
+              ./gradlew assembleRelease
+            else
+              gradle assembleRelease
+            fi
           else
-            gradle assembleDebug
+            if [ -x ./gradlew ]; then
+              ./gradlew assembleDebug
+            else
+              gradle assembleDebug
+            fi
           fi
 
       - name: Rename APK
         run: |
           mkdir -p out
-          APK_PATH="$(find app/build/outputs/apk/debug -name '*.apk' | head -n 1)"
+          APK_PATH="$(find "${{ steps.variant.outputs.artifact_path }}" -name '*.apk' | head -n 1)"
           if [ -z "$APK_PATH" ]; then
             echo "APK not found"
             exit 1
           fi
-          cp "$APK_PATH" "out/sms2dingtalk-debug-${GITHUB_REF_NAME}.apk"
+          cp "$APK_PATH" "out/${{ steps.variant.outputs.artifact_name }}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
