@@ -10,6 +10,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -27,9 +28,37 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Build debug APK
+        shell: bash
         run: |
           WORKDIR="${GITHUB_WORKSPACE:-$(pwd)}"
           cd "$WORKDIR"
+
+          run_gradle() {
+            local task="$1"
+            local attempt
+            local max_attempts=3
+
+            for attempt in 1 2 3; do
+              echo "Gradle task '$task' attempt ${attempt}/${max_attempts}"
+
+              if [ -x ./gradlew ]; then
+                ./gradlew "$task" && return 0
+              else
+                gradle "$task" && return 0
+              fi
+
+              echo "Gradle task '$task' failed on attempt ${attempt}"
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                local sleep_sec=$((attempt * 10))
+                echo "Wait ${sleep_sec}s and retry..."
+                sleep "$sleep_sec"
+              fi
+            done
+
+            echo "Gradle task '$task' failed after ${max_attempts} attempts"
+            return 1
+          }
+
           if [ ! -f settings.gradle.kts ] && [ ! -f settings.gradle ] && [ ! -f settings.gradle.dcl ]; then
             echo "Missing settings.gradle* in $WORKDIR"
             exit 1
@@ -38,15 +67,14 @@ jobs:
             echo "Missing build.gradle* in $WORKDIR"
             exit 1
           fi
-          if [ -x ./gradlew ]; then
-            ./gradlew clean
-          else
-            gradle clean
-          fi
-          if [ -x ./gradlew ]; then
-            ./gradlew assembleDebug
-          else
-            gradle assembleDebug
+
+          run_gradle clean
+          run_gradle assembleDebug
+
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$APK_PATH" ]; then
+            echo "APK not found: $APK_PATH"
+            exit 1
           fi
 
       - name: Upload APK
